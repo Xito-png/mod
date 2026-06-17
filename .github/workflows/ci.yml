@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - source
+  pull_request:
+    branches:
+      - source
+
+permissions:
+  contents: write
+
+jobs:
+  test-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test
+
+      - name: Publish to main without solution
+        if: github.event_name == 'push' && github.ref == 'refs/heads/source'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          CURRENT_DIR=$(pwd)
+          TEMP_DIR=$(mktemp -d)
+
+          # Копируем файлы из source во временную папку
+          rsync -av --delete \
+            --exclude=".git" \
+            --exclude="node_modules" \
+            "$CURRENT_DIR/" "$TEMP_DIR/"
+
+          # Удаляем решение
+          rm -rf "$TEMP_DIR/solution"
+
+          # Переходим на main
+          git checkout main || git checkout -b main
+
+          # Очищаем всё, кроме .git
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+
+          # Копируем подготовленные файлы
+          rsync -av --delete \
+            --exclude=".git" \
+            "$TEMP_DIR/" "$CURRENT_DIR/"
+
+          git add .
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Publish task from source after successful tests"
+            git push origin main
+          fi
